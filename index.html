@@ -548,4 +548,11 @@
     if(touring) return; touring=true;
     let i=0;
     (function next(){
-      if(i>=steps.length){touring=fal
+      if(i>=steps.length){touring=false; return;}
+      steps[i].do(); const wait=steps[i].t; i++; setTimeout(next, wait);
+    })();
+  }
+  document.getElementById('tourBtn').addEventListener('click',playTour);
+</script>
+</body>
+</html>
