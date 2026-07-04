@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<!--
+  UMFST Digital Logbook — Interactive Pitch Demo
+  ------------------------------------------------
+  A single self-contained file (no internet needed) so it loads instantly,
+  even inside WhatsApp's in-app browser. Everything below is commented so you
+  (Gergő) can read, learn, and tweak it.
+
+  Structure:
+    1) <style>  — all the visual design (the "look").
+    2) <body>   — the pitch layout: a phone on the left, a headline on the right.
+    3) <script> — the interactivity: switching screens, the scan animation,
+                  the language toggle, and the auto-play "tour".
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UMFST Digital Logbook — Demo</title>
+<style>
+  /* ---- Design tokens: the brand colours, reused everywhere ---- */
+  :root{
+    --navy:#0d2a3a;        /* dark headings + primary button (from your Stitch design) */
+    --teal:#12a19a;        /* the UMFST accent colour */
+    --teal-soft:#d6f5f2;   /* light teal chip background */
+    --teal-ink:#0f766e;    /* dark teal text on soft chips */
+    --red:#e11d48;         /* alerts / ETA countdown */
+    --amber:#d97706;       /* "pending" status */
+    --green:#16a34a;       /* "validated" status + success */
+    --bg:#f4f6f8;          /* app background grey */
+    --card:#ffffff;        /* card white */
+    --line:#e6e9ee;        /* hairline borders */
+    --ink:#0f172a;         /* near-black text */
+    --muted:#6b7280;       /* grey secondary text */
+    --shadow:0 6px 20px rgba(15,42,58,.08);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+    /* A calm, premium backdrop so the phone "pops" */
+    background:radial-gradient(1200px 700px at 20% -10%,#123a4d 0%,#0a1d28 45%,#060f16 100%);
+    color:#e8eef2; display:flex; align-items:center; justify-content:center;
+    min-height:100%; padding:28px; gap:48px; flex-wrap:wrap;
+  }
+
+  /* ---- Left side: the pitch headline (hidden on small screens) ---- */
+  .pitch{max-width:420px}
+  .pitch .kicker{color:var(--teal); font-weight:700; letter-spacing:.14em; font-size:12px; text-transform:uppercase}
+  .pitch h1{font-size:40px; line-height:1.08; margin:14px 0 16px; color:#fff; font-weight:800}
+  .pitch p{color:#a9bcc7; font-size:17px; line-height:1.55; margin:0 0 22px}
+  .pills{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:26px}
+  .pill{border:1px solid rgba(255,255,255,.15); background:rgba(255,255,255,.04);
+        color:#cfe0e8; padding:7px 12px; border-radius:999px; font-size:13px; font-weight:600}
+  .cta{display:flex; gap:12px; align-items:center; flex-wrap:wrap}
+  .btn-play{background:var(--teal); color:#042; border:0; font-weight:800; font-size:15px;
+            padding:13px 20px; border-radius:12px; cursor:pointer; display:inline-flex; gap:9px; align-items:center;
+            box-shadow:0 8px 22px rgba(18,161,154,.35); transition:transform .15s}
+  .btn-play:hover{transform:translateY(-1px)}
+  .langbar{display:flex; gap:6px}
+  .langbar button{background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14); color:#cfe0e8;
+                  width:38px;height:34px;border-radius:9px;cursor:pointer;font-weight:700;font-size:12px}
+  .langbar button.active{background:var(--teal); color:#042; border-color:var(--teal)}
+
+  /* ---- The phone device ---- */
+  .device{
+    width:390px; height:820px; background:#0b1116; border-radius:52px; padding:13px;
+    box-shadow:0 30px 70px rgba(0,0,0,.55), inset 0 0 0 2px #232c33;
+    position:relative; flex:0 0 auto;
+  }
+  .notch{position:absolute; top:20px; left:50%; transform:translateX(-50%); width:130px; height:26px;
+         background:#0b1116; border-radius:16px; z-index:40}
+  .viewport{position:relative; width:100%; height:100%; background:var(--bg); border-radius:42px; overflow:hidden}
+
+  /* Each app screen stacks in the same spot; only the .active one shows. */
+  .screen{position:absolute; inset:0; display:flex; flex-direction:column;
+          opacity:0; transform:translateY(8px); pointer-events:none; transition:opacity .35s, transform .35s}
+  .screen.active{opacity:1; transform:none; pointer-events:auto}
+  .scroll{flex:1; overflow-y:auto; padding:0 16px 96px; -webkit-overflow-scrolling:touch}
+  .scroll::-webkit-scrollbar{display:none}
+
+  /* App top bar */
+  .appbar{display:flex; align-items:center; justify-content:space-between; padding:52px 18px 12px}
+  .brand{display:flex; align-items:center; gap:9px; font-weight:800; color:var(--navy); font-size:18px}
+  .avatar{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#12a19a,#0d2a3a);
+          display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700}
+  .icon-btn{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;color:var(--navy)}
+
+  .sec-title{display:flex;align-items:baseline;justify-content:space-between;margin:6px 2px 12px}
+  .sec-title h2{font-size:19px;margin:0;color:var(--ink);font-weight:800}
+  .sec-title span{color:var(--muted);font-size:13px}
+
+  /* Cards */
+  .card{background:var(--card); border-radius:18px; box-shadow:var(--shadow); padding:16px; margin-bottom:14px; border:1px solid var(--line)}
+  .chip{display:inline-block;background:var(--teal-soft);color:var(--teal-ink);font-size:11px;font-weight:800;
+        padding:4px 9px;border-radius:7px;letter-spacing:.03em}
+  .row{display:flex;align-items:center;justify-content:space-between}
+  .muted{color:var(--muted);font-size:13px}
+  .time{font-weight:800;color:var(--ink)}
+  .eta{color:var(--red);font-weight:700;font-size:12px;display:flex;align-items:center;gap:4px;margin-top:3px;justify-content:flex-end}
+  .title-lg{font-size:19px;font-weight:800;color:var(--ink);margin:10px 0 2px}
+  .loc{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:13px;margin-top:10px;
+       background:#f7f9fb;border:1px solid var(--line);padding:9px 11px;border-radius:11px}
+  .btns{display:flex;gap:10px;margin-top:14px}
+  .btn{flex:1;border-radius:12px;padding:12px;font-weight:800;font-size:14px;border:1px solid var(--line);
+       display:flex;align-items:center;justify-content:center;gap:7px;cursor:pointer;background:#fff;color:var(--navy)}
+  .btn.primary{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .btn.teal{background:var(--teal);color:#fff;border-color:var(--teal)}
+  .card.dim{opacity:.72}
+
+  /* Campus map */
+  .map{position:relative;height:180px;border-radius:14px;overflow:hidden;margin-top:4px;background:linear-gradient(160deg,#1b2b34,#0e181e)}
+  .map .plot{position:absolute;inset:0}
+  .map .overlay{position:absolute;left:12px;bottom:12px;background:#fff;border-radius:11px;padding:8px 11px;
+       display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--ink);box-shadow:var(--shadow)}
+  .map .marker{position:absolute;right:14px;top:60px;width:34px;height:34px;border-radius:10px;background:var(--teal);
+       color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;box-shadow:0 6px 16px rgba(18,161,154,.5)}
+
+  /* Goal ring */
+  .goal{display:flex;align-items:center;gap:14px}
+  .ring{width:58px;height:58px;flex:0 0 auto}
+
+  /* Progress bars (logbook) */
+  .bar{height:9px;border-radius:6px;background:#eef1f4;overflow:hidden;margin-top:8px}
+  .bar > i{display:block;height:100%;border-radius:6px;background:var(--teal)}
+  .kv{display:flex;justify-content:space-between;font-size:13px;color:var(--ink);font-weight:700}
+
+  /* Log list items with status strip */
+  .log{display:flex;gap:11px;align-items:flex-start;background:#fff;border:1px solid var(--line);border-radius:13px;padding:12px;margin-bottom:10px}
+  .strip{width:5px;align-self:stretch;border-radius:6px;background:var(--green)}
+  .strip.amber{background:var(--amber)}
+  .badge{font-size:11px;font-weight:800;padding:3px 8px;border-radius:7px}
+  .badge.ok{background:#dcfce7;color:#15803d}
+  .badge.pend{background:#fef3c7;color:#b45309}
+
+  /* QR scanner screen */
+  .scanwrap{flex:1;display:flex;flex-direction:column;background:#0b1116;color:#fff;padding-bottom:76px}
+  .camera{flex:1;position:relative;overflow:hidden;
+          background:radial-gradient(120% 90% at 50% 20%,#20343f 0%,#0b1116 70%)}
+  .frame{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:210px;height:210px;border-radius:24px}
+  .frame::before,.frame::after{content:"";position:absolute;width:38px;height:38px;border:4px solid var(--teal)}
+  .corner{position:absolute;width:38px;height:38px;border:4px solid var(--teal)}
+  .corner.tl{top:0;left:0;border-right:0;border-bottom:0;border-radius:14px 0 0 0}
+  .corner.tr{top:0;right:0;border-left:0;border-bottom:0;border-radius:0 14px 0 0}
+  .corner.bl{bottom:0;left:0;border-right:0;border-top:0;border-radius:0 0 0 14px}
+  .corner.br{bottom:0;right:0;border-left:0;border-top:0;border-radius:0 0 14px 0}
+  .laser{position:absolute;left:8px;right:8px;height:3px;background:linear-gradient(90deg,transparent,var(--teal),transparent);
+         top:8px;border-radius:3px;box-shadow:0 0 14px var(--teal);animation:scan 2.1s ease-in-out infinite}
+  @keyframes scan{0%{top:8px}50%{top:196px}100%{top:8px}}
+  .scan-hint{position:absolute;bottom:26px;left:0;right:0;text-align:center;color:#bcd;font-size:13px}
+  .success{position:absolute;inset:0;background:rgba(6,15,20,.9);display:flex;flex-direction:column;
+           align-items:center;justify-content:center;gap:12px;opacity:0;pointer-events:none;transition:opacity .3s}
+  .success.show{opacity:1}
+  .checkc{width:92px;height:92px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;
+          animation:pop .4s cubic-bezier(.2,1.4,.4,1)}
+  @keyframes pop{0%{transform:scale(.3);opacity:0}100%{transform:scale(1);opacity:1}}
+  .scan-tools{display:flex;gap:10px;padding:14px 16px 18px;background:#0b1116}
+  .tool{flex:1;background:#16232b;border:1px solid #24343d;color:#cfe0e8;border-radius:12px;padding:11px;font-weight:700;
+        font-size:13px;text-align:center;cursor:pointer}
+
+  /* Dynamic-QR professor card (the "screenshot-proof" story) */
+  .qrbox{background:#fff;border-radius:16px;padding:16px;text-align:center;color:var(--ink)}
+  .qr{width:150px;height:150px;margin:8px auto;image-rendering:pixelated;border-radius:8px}
+  .countdown{display:inline-flex;align-items:center;gap:7px;color:var(--red);font-weight:800;font-size:13px;margin-top:2px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--red);animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:.25}}
+
+  /* Bottom navigation */
+  .tabbar{position:absolute;bottom:0;left:0;right:0;height:76px;background:rgba(255,255,255,.94);backdrop-filter:blur(8px);
+          border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-around;z-index:30}
+  .tab{display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--muted);font-size:11px;font-weight:700;cursor:pointer;width:56px}
+  .tab.active{color:var(--teal)}
+  .tab svg{width:22px;height:22px}
+
+  /* Caption bubble for the auto tour */
+  .caption{position:absolute;left:16px;right:16px;bottom:92px;background:var(--navy);color:#fff;border-radius:14px;
+           padding:12px 15px;font-size:13.5px;line-height:1.4;box-shadow:0 10px 30px rgba(0,0,0,.4);z-index:35;
+           opacity:0;transform:translateY(10px);transition:.35s}
+  .caption.show{opacity:1;transform:none}
+  .caption b{color:#7fe3dc}
+
+  /* Small screens (phone / WhatsApp browser): hide pitch text, center the device, shrink it */
+  @media(max-width:900px){
+    body{padding:14px;gap:18px}
+    .pitch{max-width:340px;text-align:center;order:2}
+    .pitch h1{font-size:28px}
+    .device{transform:scale(.92)}
+  }
+  @media(max-width:430px){
+    .device{transform:scale(.82);margin:-40px 0}
+    .pitch h1{font-size:24px}
+  }
+</style>
+</head>
+<body>
+
+  <!-- ============ LEFT: the pitch copy (for desktop / follow-up email) ============ -->
+  <div class="pitch">
+    <div class="kicker">UMFST · Digital Logbook</div>
+    <h1 id="pitchHead">One app for the entire clinical journey.</h1>
+    <p id="pitchSub">Schedule, verified attendance, the clinical logbook, and student safety — in every student's pocket, in four languages.</p>
+    <div class="pills">
+      <span class="pill">📍 Schedule &amp; campus map</span>
+      <span class="pill">🔐 Screenshot-proof QR attendance</span>
+      <span class="pill">📋 Validated clinical logbook</span>
+      <span class="pill">🌍 RO · EN · HU · FR</span>
+    </div>
+    <div class="cta">
+      <button class="btn-play" id="tourBtn">▶ Play 30-second tour</button>
+      <div class="langbar" title="Switch language">
+        <button data-lang="en" class="active">EN</button>
+        <button data-lang="ro">RO</button>
+        <button data-lang="hu">HU</button>
+        <button data-lang="fr">FR</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ RIGHT: the phone ============ -->
+  <div class="device">
+    <div class="notch"></div>
+    <div class="viewport">
+
+      <!-- ---------- SCREEN 1: HOME (schedule + map + goal) ---------- -->
+      <div class="screen active" id="s-home">
+        <div class="appbar">
+          <div class="brand"><span class="avatar">GC</span><span>UMFST Logbook</span></div>
+          <div class="icon-btn">🔔</div>
+        </div>
+        <div class="scroll">
+          <div class="sec-title"><h2 data-t="todaySchedule">Today's Schedule</h2><span>Nov 14, 2026</span></div>
+
+          <div class="card">
+            <div class="row">
+              <span class="chip" data-t="upcoming">UPCOMING</span>
+              <div style="text-align:right">
+                <div class="time">09:00 – 12:00</div>
+                <div class="eta">⏱ <span data-t="eta">ETA: 45 min</span></div>
+              </div>
+            </div>
+            <div class="title-lg">Internal Medicine</div>
+            <div class="muted">Dr. Popescu Ion</div>
+            <div class="loc">📍 Spital Clinic Județean · Ward B, Floor 3</div>
+            <div class="btns">
+              <button class="btn primary" id="markBtn">✓ <span data-t="markAtt">Mark Attendance</span></button>
+              <button class="btn" data-nav="log">▤ <span data-t="prepLog">Prepare Log</span></button>
+            </div>
+          </div>
+
+          <div class="card dim">
+            <div class="row">
+              <div>
+                <div class="title-lg" style="margin-top:0">General Surgery Lab</div>
+                <div class="muted">Dr. Radu Andrei</div>
+              </div>
+              <div class="time">14:00 – 16:00</div>
+            </div>
+            <div class="loc">📍 Campus Building A · Lab 4</div>
+          </div>
+
+          <div class="card">
+            <div class="sec-title" style="margin:0 0 10px"><h2 style="font-size:16px" data-t="campusMap">Campus Map</h2><span>◈</span></div>
+            <div class="map">
+              <svg class="plot" viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice">
+                <defs><linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#2a4250"/><stop offset="1" stop-color="#16242c"/></linearGradient></defs>
+                <rect width="320" height="180" fill="url(#g1)"/>
+                <!-- stylised roads -->
+                <path d="M-10 120 L200 40 L340 90" stroke="#3a5563" stroke-width="10" fill="none" opacity=".5"/>
+                <path d="M40 200 L120 60" stroke="#3a5563" stroke-width="7" fill="none" opacity=".4"/>
+                <!-- isometric building blocks -->
+                <g transform="translate(150 96)">
+                  <polygon points="0,-34 46,-8 0,18 -46,-8" fill="#e7edf1"/>
+                  <polygon points="-46,-8 0,18 0,60 -46,34" fill="#b9c6cf"/>
+                  <polygon points="46,-8 0,18 0,60 46,34" fill="#cdd8df"/>
+                </g>
+                <g transform="translate(96 118) scale(.7)">
+                  <polygon points="0,-34 46,-8 0,18 -46,-8" fill="#d3dde3"/>
+                  <polygon points="-46,-8 0,18 0,52 -46,26" fill="#a7b6bf"/>
+                  <polygon points="46,-8 0,18 0,52 46,26" fill="#bcc9d1"/>
+                </g>
+                <!-- route line to destination -->
+                <path d="M96 120 Q150 150 236 96" stroke="#12a19a" stroke-width="3.5" stroke-dasharray="7 6" fill="none"/>
+              </svg>
+              <div class="overlay">🚶 <span>1.2 km · <span data-t="walk">15 min walk</span></span></div>
+              <div class="marker">A</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="goal">
+              <svg class="ring" viewBox="0 0 42 42">
+                <circle cx="21" cy="21" r="16" fill="none" stroke="#eef1f4" stroke-width="6"/>
+                <circle cx="21" cy="21" r="16" fill="none" stroke="#12a19a" stroke-width="6" stroke-linecap="round"
+                        stroke-dasharray="100.5" stroke-dashoffset="40" transform="rotate(-90 21 21)"/>
+                <text x="21" y="25" text-anchor="middle" font-size="12" font-weight="800" fill="#0f172a">3/5</text>
+              </svg>
+              <div>
+                <div style="font-weight:800;color:var(--ink)" data-t="dailyGoal">Daily Clinical Goal</div>
+                <div class="muted" data-t="goalSub">2 more log entries needed today</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ---------- SCREEN 2: QR ATTENDANCE (scanner + dynamic QR) ---------- -->
+      <div class="screen" id="s-qr">
+        <div class="scanwrap">
+          <div class="appbar" style="color:#fff;padding-top:52px">
+            <div class="brand" style="color:#fff"><span data-nav="home" style="cursor:pointer">←</span>&nbsp; <span data-t="checkIn">Check-in</span></div>
+            <div class="icon-btn" style="color:#fff">⚡</div>
+          </div>
+          <div class="camera" id="cameraArea">
+            <div class="frame">
+              <span class="corner tl"></span><span class="corner tr"></span>
+              <span class="corner bl"></span><span class="corner br"></span>
+              <div class="laser"></div>
+            </div>
+            <div class="scan-hint" data-t="scanHint">Point at the professor's live QR code</div>
+            <!-- success state, revealed by JS -->
+            <div class="success" id="scanSuccess">
+              <div class="checkc">
+                <svg width="46" height="46" viewBox="0 0 24 24" fill="none"><path d="M4 12.5l5 5 11-11" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <div style="font-weight:800;font-size:18px" data-t="confirmed">Attendance Confirmed</div>
+              <div style="color:#9fd;font-size:13px">Internal Medicine · 09:00</div>
+            </div>
+          </div>
+          <div class="scan-tools">
+            <div class="tool" data-nav="home" data-t="manual">Manual entry</div>
+            <div class="tool" id="simScan" data-t="simulate">▶ Simulate scan</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ---------- SCREEN 3: PROFESSOR DYNAMIC QR (screenshot-proof story) ---------- -->
+      <div class="screen" id="s-prof">
+        <div class="appbar">
+          <div class="brand"><span data-nav="home" style="cursor:pointer">←</span>&nbsp;<span>Attendance Session</span></div>
+          <div class="icon-btn">⋯</div>
+        </div>
+        <div class="scroll">
+          <div class="sec-title"><h2>Internal Medicine</h2><span>Ward B</span></div>
+          <div class="qrbox card">
+            <div class="chip" style="background:#fee2e2;color:#b91c1c" data-t="live">● LIVE</div>
+            <canvas class="qr" id="qrCanvas" width="21" height="21"></canvas>
+            <div class="countdown"><span class="dot"></span><span data-t="rotates">Code rotates in</span>&nbsp;<b id="cdNum">17</b>s</div>
+            <div class="muted" style="margin-top:8px" data-t="qrExplain">A screenshot is useless in seconds — the code changes automatically, so attendance can't be faked.</div>
+          </div>
+          <div class="card">
+            <div class="kv"><span data-t="checkedIn">Checked in</span><span>23 / 28</span></div>
+            <div class="bar"><i style="width:82%"></i></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ---------- SCREEN 4: LOGBOOK ---------- -->
+      <div class="screen" id="s-log">
+        <div class="appbar">
+          <div class="brand"><span class="avatar">GC</span><span data-t="logbook">Clinical Logbook</span></div>
+          <div class="icon-btn">🔔</div>
+        </div>
+        <div class="scroll">
+          <div class="sec-title"><h2 data-t="myProgress">My Progress</h2><span data-t="year">Year 4</span></div>
+
+          <div class="card">
+            <div class="goal">
+              <svg class="ring" viewBox="0 0 42 42" style="width:66px;height:66px">
+                <circle cx="21" cy="21" r="16" fill="none" stroke="#eef1f4" stroke-width="6"/>
+                <circle cx="21" cy="21" r="16" fill="none" stroke="#12a19a" stroke-width="6" stroke-linecap="round"
+                        stroke-dasharray="100.5" stroke-dashoffset="28" transform="rotate(-90 21 21)"/>
+                <text x="21" y="25" text-anchor="middle" font-size="11" font-weight="800" fill="#0f172a">72%</text>
+              </svg>
+              <div>
+                <div style="font-weight:800;color:var(--ink)" data-t="overall">Overall completion</div>
+                <div class="muted" data-t="overallSub">108 of 150 required procedures validated</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="kv"><span data-t="coreSkills">Core skills</span><span>84%</span></div>
+            <div class="bar"><i style="width:84%"></i></div>
+            <div class="kv" style="margin-top:14px"><span data-t="special">Specialisation</span><span>61%</span></div>
+            <div class="bar"><i style="width:61%;background:#0d2a3a"></i></div>
+          </div>
+
+          <div class="sec-title" style="margin-top:6px"><h2 style="font-size:16px" data-t="recentLogs">Recent entries</h2><span>▤</span></div>
+
+          <div class="log">
+            <div class="strip"></div>
+            <div style="flex:1">
+              <div class="row"><b style="color:var(--ink)">Venipuncture — supervised</b><span class="badge ok" data-t="valid">Validated</span></div>
+              <div class="muted" style="margin-top:4px">Cardiology · Dr. Popescu · Nov 12</div>
+            </div>
+          </div>
+          <div class="log">
+            <div class="strip"></div>
+            <div style="flex:1">
+              <div class="row"><b style="color:var(--ink)">ECG interpretation</b><span class="badge ok" data-t="valid">Validated</span></div>
+              <div class="muted" style="margin-top:4px">Cardiology · Dr. Popescu · Nov 11</div>
+            </div>
+          </div>
+          <div class="log">
+            <div class="strip amber"></div>
+            <div style="flex:1">
+              <div class="row"><b style="color:var(--ink)">Wound suturing</b><span class="badge pend" data-t="pending">Pending</span></div>
+              <div class="muted" style="margin-top:4px">Surgery · awaiting Dr. Radu · Nov 14</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ---------- SCREEN 5: SAFETY / SOS ---------- -->
+      <div class="screen" id="s-sos">
+        <div class="appbar">
+          <div class="brand"><span data-t="support">Support &amp; Safety</span></div>
+          <div class="icon-btn">🔔</div>
+        </div>
+        <div class="scroll">
+          <div class="card" style="background:linear-gradient(135deg,#0d2a3a,#12a19a);color:#fff;border:0">
+            <div style="font-weight:800;font-size:18px" data-t="needHelp">Need help now?</div>
+            <div style="opacity:.85;font-size:13px;margin:6px 0 14px" data-t="sosSub">Connects you to UMFST's existing student-support services.</div>
+            <div class="btns">
+              <button class="btn" style="background:#fff;color:#b91c1c" >📞 112</button>
+              <button class="btn teal" data-t="reqSupport">Request support</button>
+            </div>
+          </div>
+          <div class="card">
+            <b style="color:var(--ink)" data-t="resources">Support resources</b>
+            <div class="loc" style="margin-top:12px">🧠 <span data-t="counsel">Student counselling — book a session</span></div>
+            <div class="loc">🩺 <span data-t="occhealth">Occupational health &amp; incident report</span></div>
+          </div>
+          <div class="muted" style="text-align:center;font-size:11px;padding:8px 20px" data-t="disclaimer">This is not an emergency service. In an emergency, call 112.</div>
+        </div>
+      </div>
+
+      <!-- Caption bubble used by the auto-play tour -->
+      <div class="caption" id="caption"></div>
+
+      <!-- ---------- BOTTOM TAB BAR ---------- -->
+      <div class="tabbar">
+        <div class="tab active" data-nav="home">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>
+          <span data-t="tabHome">Home</span></div>
+        <div class="tab" data-nav="log">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3h9l3 3v15H6zM9 8h6M9 12h6M9 16h4"/></svg>
+          <span data-t="tabLogs">Logs</span></div>
+        <div class="tab" data-nav="prof">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="6" height="6"/><rect x="14" y="4" width="6" height="6"/><rect x="4" y="14" width="6" height="6"/><path d="M14 14h6v6h-6z"/></svg>
+          <span data-t="tabQR">QR</span></div>
+        <div class="tab" data-nav="sos">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg>
+          <span data-t="tabSafety">Safety</span></div>
+      </div>
+
+    </div>
+  </div>
+
+<script>
+  /* ---------------- Screen navigation ---------------- */
+  // Map a short name to the screen element id and (optionally) which tab lights up.
+  const screens = {home:'s-home', log:'s-log', qr:'s-qr', prof:'s-prof', sos:'s-sos'};
+  const tabFor  = {home:'home', log:'log', qr:'prof', prof:'prof', sos:'sos'};
+
+  function go(name){
+    // Show the chosen screen, hide the rest.
+    Object.values(screens).forEach(id=>document.getElementById(id).classList.remove('active'));
+    document.getElementById(screens[name]).classList.add('active');
+    // Highlight the matching bottom tab.
+    document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.nav===tabFor[name]));
+    // Reset the scanner success state whenever we leave/enter.
+    document.getElementById('scanSuccess').classList.remove('show');
+    document.querySelector('#s-qr .laser').style.display='block';
+  }
+  // Any element with data-nav="..." becomes a navigation button.
+  document.querySelectorAll('[data-nav]').forEach(el=>el.addEventListener('click',()=>go(el.dataset.nav)));
+
+  // "Mark Attendance" on Home jumps straight into the scanner.
+  document.getElementById('markBtn').addEventListener('click',()=>go('qr'));
+
+  /* ---------------- Scanner: simulate a successful scan ---------------- */
+  function runScan(){
+    const ok = document.getElementById('scanSuccess');
+    document.querySelector('#s-qr .laser').style.display='none'; // stop the laser
+    ok.classList.add('show');                                    // pop the green check
+  }
+  document.getElementById('simScan').addEventListener('click',runScan);
+
+  /* ---------------- Dynamic QR: redraw + countdown ---------------- */
+  // Draws a random QR-like pattern onto the tiny canvas (purely visual).
+  const qc = document.getElementById('qrCanvas').getContext('2d');
+  function drawQR(){
+    qc.clearRect(0,0,21,21);
+    qc.fillStyle='#0d2a3a';
+    for(let y=0;y<21;y++)for(let x=0;x<21;x++){ if(Math.random()>.5) qc.fillRect(x,y,1,1); }
+    // Draw the three finder squares so it reads as a real QR.
+    [[0,0],[14,0],[0,14]].forEach(([ox,oy])=>{
+      qc.fillRect(ox,oy,7,7); qc.clearRect(ox+1,oy+1,5,5); qc.fillRect(ox+2,oy+2,3,3);
+    });
+  }
+  drawQR();
+  let cd = 17;
+  setInterval(()=>{                       // every second: tick down, and refresh the code at zero
+    cd--; if(cd<0){cd=20; drawQR();}
+    document.getElementById('cdNum').textContent = cd;
+  },1000);
+
+  /* ---------------- Language toggle (RO/EN/HU/FR) ---------------- */
+  // Only the key selling-point labels are translated — enough to prove the multilingual point.
+  const T = {
+    en:{todaySchedule:"Today's Schedule",upcoming:"UPCOMING",eta:"ETA: 45 min",markAtt:"Mark Attendance",prepLog:"Prepare Log",campusMap:"Campus Map",walk:"15 min walk",dailyGoal:"Daily Clinical Goal",goalSub:"2 more log entries needed today",checkIn:"Check-in",scanHint:"Point at the professor's live QR code",confirmed:"Attendance Confirmed",manual:"Manual entry",simulate:"▶ Simulate scan",live:"● LIVE",rotates:"Code rotates in",qrExplain:"A screenshot is useless in seconds — the code changes automatically, so attendance can't be faked.",checkedIn:"Checked in",logbook:"Clinical Logbook",myProgress:"My Progress",year:"Year 4",overall:"Overall completion",overallSub:"108 of 150 required procedures validated",coreSkills:"Core skills",special:"Specialisation",recentLogs:"Recent entries",valid:"Validated",pending:"Pending",support:"Support & Safety",needHelp:"Need help now?",sosSub:"Connects you to UMFST's existing student-support services.",reqSupport:"Request support",resources:"Support resources",counsel:"Student counselling — book a session",occhealth:"Occupational health & incident report",disclaimer:"This is not an emergency service. In an emergency, call 112.",tabHome:"Home",tabLogs:"Logs",tabQR:"QR",tabSafety:"Safety"},
+    ro:{todaySchedule:"Programul de azi",upcoming:"URMEAZĂ",eta:"Sosire: 45 min",markAtt:"Marchează prezența",prepLog:"Pregătește fișa",campusMap:"Harta campusului",walk:"15 min pe jos",dailyGoal:"Obiectiv clinic zilnic",goalSub:"Încă 2 înregistrări necesare azi",checkIn:"Prezență",scanHint:"Îndreaptă spre codul QR live al profesorului",confirmed:"Prezență confirmată",manual:"Introducere manuală",simulate:"▶ Simulează scanarea",live:"● LIVE",rotates:"Codul se schimbă în",qrExplain:"O captură devine inutilă în câteva secunde — codul se schimbă automat, deci prezența nu poate fi falsificată.",checkedIn:"Prezenți",logbook:"Caiet clinic",myProgress:"Progresul meu",year:"Anul 4",overall:"Progres total",overallSub:"108 din 150 de proceduri validate",coreSkills:"Competențe de bază",special:"Specializare",recentLogs:"Înregistrări recente",valid:"Validat",pending:"În așteptare",support:"Sprijin și siguranță",needHelp:"Ai nevoie de ajutor acum?",sosSub:"Te conectează la serviciile de sprijin ale UMFST.",reqSupport:"Cere sprijin",resources:"Resurse de sprijin",counsel:"Consiliere studențească — programează",occhealth:"Medicina muncii și raportare incident",disclaimer:"Acesta nu este un serviciu de urgență. În caz de urgență sună la 112.",tabHome:"Acasă",tabLogs:"Fișe",tabQR:"QR",tabSafety:"Siguranță"},
+    hu:{todaySchedule:"Mai órarend",upcoming:"KÖVETKEZŐ",eta:"Érkezés: 45 perc",markAtt:"Jelenlét rögzítése",prepLog:"Napló előkészítése",campusMap:"Kampusztérkép",walk:"15 perc gyalog",dailyGoal:"Napi klinikai cél",goalSub:"Még 2 bejegyzés szükséges ma",checkIn:"Jelenlét",scanHint:"Irányítsd a tanár élő QR-kódjára",confirmed:"Jelenlét megerősítve",manual:"Kézi bevitel",simulate:"▶ Beolvasás szimulálása",live:"● ÉLŐ",rotates:"A kód frissül",qrExplain:"A képernyőkép másodpercek alatt haszontalan — a kód automatikusan változik, így a jelenlét nem hamisítható.",checkedIn:"Jelen",logbook:"Klinikai napló",myProgress:"Haladásom",year:"4. év",overall:"Teljes haladás",overallSub:"150-ből 108 kötelező beavatkozás igazolva",coreSkills:"Alapkészségek",special:"Szakosodás",recentLogs:"Legutóbbi bejegyzések",valid:"Igazolt",pending:"Függőben",support:"Támogatás és biztonság",needHelp:"Segítségre van szükséged?",sosSub:"Összeköt az UMFST meglévő támogató szolgálataival.",reqSupport:"Segítség kérése",resources:"Támogatási források",counsel:"Diáktanácsadás — időpontfoglalás",occhealth:"Foglalkozás-egészségügy és bejelentés",disclaimer:"Ez nem sürgősségi szolgálat. Vészhelyzetben hívd a 112-t.",tabHome:"Kezdő",tabLogs:"Naplók",tabQR:"QR",tabSafety:"Biztonság"},
+    fr:{todaySchedule:"Emploi du temps",upcoming:"À VENIR",eta:"Arrivée : 45 min",markAtt:"Marquer la présence",prepLog:"Préparer le journal",campusMap:"Plan du campus",walk:"15 min à pied",dailyGoal:"Objectif clinique du jour",goalSub:"2 entrées supplémentaires aujourd'hui",checkIn:"Présence",scanHint:"Visez le QR code en direct du professeur",confirmed:"Présence confirmée",manual:"Saisie manuelle",simulate:"▶ Simuler le scan",live:"● EN DIRECT",rotates:"Le code change dans",qrExplain:"Une capture d'écran est inutile en quelques secondes — le code change automatiquement, la présence ne peut être falsifiée.",checkedIn:"Présents",logbook:"Carnet clinique",myProgress:"Ma progression",year:"4e année",overall:"Progression globale",overallSub:"108 des 150 procédures requises validées",coreSkills:"Compétences de base",special:"Spécialisation",recentLogs:"Entrées récentes",valid:"Validé",pending:"En attente",support:"Aide et sécurité",needHelp:"Besoin d'aide ?",sosSub:"Vous relie aux services d'aide existants de l'UMFST.",reqSupport:"Demander de l'aide",resources:"Ressources d'aide",counsel:"Conseil étudiant — prendre RDV",occhealth:"Santé au travail et signalement",disclaimer:"Ceci n'est pas un service d'urgence. En cas d'urgence, appelez le 112.",tabHome:"Accueil",tabLogs:"Journaux",tabQR:"QR",tabSafety:"Sécurité"}
+  };
+  const heads = {
+    en:["One app for the entire clinical journey.","Schedule, verified attendance, the clinical logbook, and student safety — in every student's pocket, in four languages."],
+    ro:["O aplicație pentru tot parcursul clinic.","Orar, prezență verificată, caietul clinic și siguranța studenților — în buzunarul fiecărui student, în patru limbi."],
+    hu:["Egy alkalmazás a teljes klinikai úthoz.","Órarend, igazolt jelenlét, klinikai napló és diákbiztonság — minden hallgató zsebében, négy nyelven."],
+    fr:["Une app pour tout le parcours clinique.","Emploi du temps, présence vérifiée, carnet clinique et sécurité étudiante — dans la poche de chaque étudiant, en quatre langues."]
+  };
+  function setLang(l){
+    document.querySelectorAll('[data-t]').forEach(el=>{ if(T[l][el.dataset.t]) el.textContent=T[l][el.dataset.t]; });
+    document.getElementById('pitchHead').textContent = heads[l][0];
+    document.getElementById('pitchSub').textContent  = heads[l][1];
+    document.querySelectorAll('.langbar button').forEach(b=>b.classList.toggle('active', b.dataset.lang===l));
+  }
+  document.querySelectorAll('.langbar button').forEach(b=>b.addEventListener('click',()=>setLang(b.dataset.lang)));
+
+  /* ---------------- Auto-play "tour" (video-like, hands-free) ---------------- */
+  // A scripted sequence: switch screen, show a caption, wait, repeat.
+  const cap = document.getElementById('caption');
+  function showCap(text){ cap.innerHTML=text; cap.classList.add('show'); }
+  function hideCap(){ cap.classList.remove('show'); }
+  const steps = [
+    {do:()=>{go('home'); showCap("Every student opens to <b>today's schedule</b> — where to be, and how to get there on the campus map.");}, t:4200},
+    {do:()=>{go('qr'); showCap("Tap <b>Mark Attendance</b> and scan the professor's <b>live QR</b>.");}, t:2600},
+    {do:()=>{runScan(); showCap("Verified in one tap — <b>no paper sheets</b>, no proxy sign-ins.");}, t:3200},
+    {do:()=>{go('prof'); showCap("The QR <b>rotates every few seconds</b>, so a forwarded screenshot can't fake attendance.");}, t:4200},
+    {do:()=>{go('log'); showCap("The <b>digital logbook</b> tracks every validated procedure toward graduation requirements.");}, t:4200},
+    {do:()=>{go('sos'); showCap("And <b>one-tap support</b> connects students to UMFST's existing services.");}, t:3800},
+    {do:()=>{go('home'); hideCap();}, t:600}
+  ];
+  let touring=false;
+  function playTour(){
+    if(touring) return; touring=true;
+    let i=0;
+    (function next(){
+      if(i>=steps.length){touring=false; return;}
+      steps[i].do(); const wait=steps[i].t; i++; setTimeout(next, wait);
+    })();
+  }
+  document.getElementById('tourBtn').addEventListener('click',playTour);
+</script>
+</body>
+</html>
